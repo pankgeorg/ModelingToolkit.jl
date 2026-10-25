@@ -141,9 +141,9 @@ The `simplified_sys` has undergone [`ModelingToolkitBase.mtkcompile`](@ref) and 
   - `initialization_solver_alg`: A NonlinearSolve algorithm to use for solving for a feasible set of state and algebraic variables that satisfies the specified operating point.
   - `autodiff`: An `ADType` supported by DifferentiationInterface.jl to use for calculating the necessary jacobians. Defaults to using `AutoForwardDiff()`
   - `ignore_system_initial_conditions`: Whether to ignore `initial_conditions(sys)` and only use `op`.
-  - `specialize`: The `SciMLBase.AbstractSpecialization` of the `ODEProblem` built for the system. With
-    `SciMLBase.FullSpecialize`, the system and observed functions are called directly instead of through
-    function wrappers, so the evaluation is fully specialized.
+  - `specialize`: The `SciMLBase.AbstractSpecialization` of the `ODEProblem` built for the system, or `nothing` for
+    `ODEProblem`'s default. With `SciMLBase.FullSpecialize`, the system and observed functions are called directly
+    instead of through function wrappers, so the evaluation is fully specialized.
   - `kwargs`: Are passed on to `find_solvables!`
 
 See also [`linearize`](@ref) which provides a higher-level interface.
@@ -168,7 +168,7 @@ function linearization_function(
         t = 0.0,
         ignore_system_initial_conditions = false,
         loop_opening_params = SymbolicT[],
-        specialize = SciMLBase.AutoSpecialize,
+        specialize = nothing,
         kwargs...
     )
     op = Dict(op)
@@ -216,7 +216,8 @@ function linearization_function(
         initializealg = initialize ? OverrideInit() : NoInit()
     end
 
-    prob = ODEProblem{true, specialize}(
+    prob_type = specialize === nothing ? ODEProblem{true} : ODEProblem{true, specialize}
+    prob = prob_type(
         sys, merge(op, anydict(p)), (t, t); allow_incomplete = true,
         algebraic_only = true, guesses, missing_guess_value, eval_expression, eval_module
     )
