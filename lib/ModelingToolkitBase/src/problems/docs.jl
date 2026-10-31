@@ -64,6 +64,12 @@ $INITIALIZEPROB_KWARGS
   happens when the initialization problem is missing guess values for variables.
 - `initsys_mtkcompile_kwargs`: A `NamedTuple` of keyword arguments to pass to `mtkcompile`
   when it is called on the initialization system.
+- `strip_initialization_symbolics`: Drop the symbolic references (the initialization
+  system and the symbolic operating point, guesses and equations) from the initialization
+  data, for ahead-of-time compilation. Initialization and parameter updates keep working.
+  `remake` with new symbolic values is not supported: it rebuilds the initialization without
+  the original operating point, guesses and initialization equations, so it can initialize
+  to different values or fail.
 """
 
 const TSPAN_DEFAULT_DOCS = """
