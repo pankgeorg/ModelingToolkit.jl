@@ -953,7 +953,8 @@ function CommonSolve.solve(prob::LinearizationProblem; allow_input_derivatives =
         end
     end
 
-    return (; A, B, C, D), (; x, p, t)
+    # `u0` and `p` are updated in place between solves, so the result holds copies.
+    return (; A, B, C, D), (; x = x === nothing ? x : copy(x), p = copy(p), t)
 end
 
 """
@@ -1275,18 +1276,21 @@ function linearize(
     for (k, v) in op
         isequal(v, COMMON_NOTHING) && continue
         v === COMMON_MISSING && continue
-        v = _resolve_op_value(prob, v)
-        if is_parameter(prob, Initial(k))
-            setu(prob, Initial(k))(prob, v)
-        else
-            setu(prob, k)(prob, v)
-        end
+        _op_setter(prob, k)(prob, _resolve_op_value(prob, v))
     end
     p = anydict(p)
     for (k, v) in p
         setu(prob, k)(prob, v)
     end
     return solve(prob; allow_input_derivatives)
+end
+
+# The setter of an operating-point key. An unknown's setter writes `u0` and `Initial(k)`, so
+# the value holds with and without initialization. Other variables have only `Initial(k)`.
+function _op_setter(prob, k)
+    is_unknown = SymbolicIndexingInterface.is_variable(prob, k)
+    !is_unknown && is_parameter(prob, Initial(k)) && return setu(prob, Initial(k))
+    return setu(prob, k)
 end
 
 # Resolve an operating-point value to something that can be passed to a setter.
@@ -1344,9 +1348,7 @@ function __linearize_multiple_op_barrier(ssys, lin_fun; ops, ts, allow_input_der
     # The op keys are identical across time points, so checking the first one suffices.
     _check_held_signals(lin_fun.loop_opening_params, op1)
     op_keys = collect(keys(op1))
-    setters = map(op_keys) do k
-        is_parameter(prob, Initial(k)) ? setu(prob, Initial(k)) : setu(prob, k)
-    end
+    setters = map(Base.Fix1(_op_setter, prob), op_keys)
 
     for (op, t) in zip(ops, ts)
         op = as_atomic_dict_with_defaults(Dict{SymbolicT, SymbolicT}(op), COMMON_NOTHING)

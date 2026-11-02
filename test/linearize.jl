@@ -4,6 +4,7 @@ using NonlinearSolve
 using Symbolics: value
 using CommonSolve: solve
 using SymbolicIndexingInterface
+import OrdinaryDiffEq
 
 # Test reorder_unknowns
 # sys = ssrand(1,1,4);
@@ -426,6 +427,53 @@ end
     @test A(lp) ≈ -36.0
     lp = build(); setp(lp, [ix, sys.a])(lp, [2.0, 3.0])
     @test A(lp) ≈ -36.0
+end
+
+@testset "`op` moves unknowns with and without initialization" begin
+    # `f_x = -3a * x^2`, so `A = -36` at `x = 2`, `a = 3`.
+    @parameters a = 1.0
+    @variables x(t) = 1.0 u(t) = 0.0 [input = true] y(t) [output = true]
+    @named plant = System([D(x) ~ -a * x^3 + u, y ~ x], t)
+    # `0 ~ z^3 + z - w` holds at `w = 2`, `z = 1`, where `f_x = -2w`, `f_z = 1`, `g_x = -1` and
+    # `g_z = 3z^2 + 1` give the descriptor form `A = [f_x f_z; c * f_x c * f_z]`, `c = -g_x / g_z`.
+    @variables w(t) z(t) [guess = 0.5] v(t) [input = true]
+    @named dae = System([D(w) ~ -w^2 + z + v, 0 ~ z^3 + z - w], t)
+    for initialize in (false, true)
+        lf, ssys = linearization_function(
+            plant, [u], [y]; op = Dict(x => 1.0, u => 0.0, a => 1.0), initialize
+        )
+        mats, extras = linearize(ssys, lf; op = Dict(ssys.x => 2.0, ssys.a => 3.0))
+        @test mats.A ≈ [-36.0;;]
+        @test extras.x ≈ [2.0]
+        @test getp(ssys, Initial(ssys.x))(extras.p) == 2.0
+        linearize(ssys, lf; op = Dict(ssys.x => 3.0))
+        @test extras.x ≈ [2.0]
+        @test getp(ssys, Initial(ssys.x))(extras.p) == 2.0
+
+        lf, ssys = linearization_function(
+            dae, [v], [z]; op = Dict(w => 1.0, z => 0.6823278038280193, v => 0.0), initialize
+        )
+        mats, extras = linearize(ssys, lf; op = Dict(ssys.w => 2.0, ssys.z => 1.0))
+        @test mats.A ≈ [-4.0 1.0; -1.0 0.25]
+        @test extras.x ≈ [2.0, 1.0]
+
+        # Along `s(t) = 1 / (1 + t)`, the solution of `D(s) ~ -s^2`, `A = -2s(t)`.
+        @variables s(t) = 1.0 r(t) = 0.0 [input = true] q(t) [output = true]
+        @named decay = System([D(s) ~ -s^2 + r, q ~ s], t)
+        ts = [0.0, 0.5, 1.0]
+        sol = OrdinaryDiffEq.solve(
+            ODEProblem(mtkcompile(decay; inputs = [r]), [s => 1.0, r => 0.0], (0.0, 1.0)),
+            OrdinaryDiffEq.Tsit5(); abstol = 1.0e-11, reltol = 1.0e-11
+        )
+        allmats, decaysys, allextras = linearize(
+            decay, [r], [q]; op = ModelingToolkit.LinearizationOpPoint(sol, ts), initialize
+        )
+        for (i, ti) in enumerate(ts)
+            @test allmats[i].A ≈ [-2 / (1 + ti);;] atol = 1.0e-8
+            @test allextras[i].x ≈ [1 / (1 + ti)] atol = 1.0e-8
+            @test getp(decaysys, Initial(decaysys.s))(allextras[i].p) ≈ 1 / (1 + ti) atol = 1.0e-8
+        end
+    end
 end
 
 @testset "Issue#4830: Loop opening variables can be given a `missing` value in `op`" begin
